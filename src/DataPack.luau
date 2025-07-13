@@ -25,6 +25,7 @@ export type DataPack<T> = {
 	GetOriginalSize: (self: DataPack<T>) -> number,
 	GetCompressionRatio: (self: DataPack<T>) -> number,
 	GetMetadata: (self: DataPack<T>) -> Metadata,
+	GetBuffer: (self: DataPack<T>) -> buffer?,
 }
 type InternalDataPack<T> = DataPack<T> & {
 	__index: any,
@@ -60,7 +61,7 @@ export type PackConstructor = {
 		metadata: Metadata,
 	}?) -> DataPack<T>,
 	NewStream: (initialCapacity: number?) -> StreamWriter,
-	FromBuffer: (buf: buffer, Metadata) -> DataPack<any>,
+	FromBuffer: (buf: buffer, metadata: Metadata) -> DataPack<any>,
 
 	-- Constants
 	COMPRESSION_THRESHOLD: number,
@@ -476,6 +477,15 @@ function DataPack:Clone()
 		else nil
 
 	return newPack :: DataPack<any>
+end
+
+function DataPack:GetBuffer()
+	if not (self :: InternalDataPack<any>)._buffer then
+		warn("DataPack buffer is nil")
+		return nil
+	end
+
+	return (self :: InternalDataPack<any>)._buffer
 end
 
 function DataPack:Destroy()
