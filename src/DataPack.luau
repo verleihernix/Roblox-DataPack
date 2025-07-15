@@ -86,116 +86,95 @@ PackConstructor.COMPRESSION_THRESHOLD = 1024 -- 1KB
 PackConstructor.DEFAULT_CHUNK_SIZE = 4096 -- 4KB
 PackConstructor.VERSION = "1" -- please change the version if you are contributing
 
--- simplified LZ77-like compression
+-- optimized LZ77-like compression with simple hash map
 function PackConstructor.compress(data)
 	if #data < PackConstructor.COMPRESSION_THRESHOLD then
 		return data
 	end
 
-	local compressed: { string } = {}
+	local windowSize = 255
+	local hashMap = {} :: { [string]: { number } }
+	local out = {} :: { string }
 	local i = 1
 
 	while i <= #data do
-		local longest = ""
-		local longestPos = 0
-
-		-- search for longest match in window
-		local searchStart = math.max(1, i - 255)
-		for pos = searchStart, i - 1 do
-			local j = 0
-			local maxJ = math.min(255, #data - i + 1)
-
-			while
-				pos + j <= i - 1
-				and i + j <= #data
-				and data:sub(pos + j, pos + j) == data:sub(i + j, i + j)
-				and j < maxJ
-			do
-				j = j + 1
+		local matchLen, matchDist = 0, 0
+		local maxLook = math.min(windowSize, i - 1)
+		for l = 3, math.min(255, #data - i + 1) do
+			local substr = data:sub(i, i + l - 1)
+			local positions = hashMap[substr]
+			if not positions then
+				break
 			end
 
-			if j > #longest then
-				longest = data:sub(pos, pos + j - 1)
-				longestPos = i - pos
-			end
+			matchLen = 1
+			matchDist = i - positions[#positions]
 		end
 
-		if #longest >= 3 then
-			-- add reference: [distance][length]
-			table.insert(compressed, string.char(255)) -- escape
-			table.insert(compressed, string.char(longestPos))
-			table.insert(compressed, string.char(#longest))
-			i = i + #longest
+		if matchLen >= 3 then
+			table.insert(out, string.char(255))
+			table.insert(out, string.char(matchDist))
+			table.insert(out, string.char(matchLen))
+
+			for j = 0, matchLen - 1 do
+				local s = data:sub(i + j, i + j)
+				local key = s
+				hashMap[key] = hashMap[key] or {}
+				table.insert(hashMap[key], i + j)
+			end
+			i += matchLen
 		else
-			-- literal
-			local char = data:sub(i, i)
-			if char:byte() == 255 then
-				table.insert(compressed, string.char(255))
-				table.insert(compressed, string.char(0)) -- escaped literal
+			local c = data:sub(i, i)
+			if c:byte() == 255 then
+				table.insert(out, string.char(255))
+				table.insert(out, string.char(0))
 			end
 
-			table.insert(compressed, char)
-			i = i + 1
+			table.insert(out, c)
+			hashMap[c] = hashMap[c] or {}
+			table.insert(hashMap[c], i)
+
+			i += 1
 		end
 	end
 
-	return table.concat(compressed)
+	return table.concat(out)
 end
 
 function PackConstructor.decompress(data)
-	local decompressed: { string } = {}
+	local res = {}
 	local i = 1
 
 	while i <= #data do
-		local byte = data:byte(i)
+		local b = data:byte(i)
+		if b == 255 then
+			local nb = data:byte(i + 1) or 0
 
-		if byte == 255 then -- escape
-			if i + 1 > #data then
-				warn("Corrupted data: unexpected end after escape")
-				return nil
-			end
-
-			local nextByte = data:byte(i + 1)
-			if nextByte == 0 then
-				-- escaped literal 255
-				table.insert(decompressed, string.char(255))
-				i = i + 2
+			if nb == 0 then
+				table.insert(res, string.char(255))
+				i += 2
 			else
-				-- reference
-				if i + 2 > #data then
-					warn("Corrupted data: incomplete reference")
+				local dist = nb
+				local length = data:byte(i + 2) or 0
+				local start = #res - dist + 1
+
+				if start < 1 then
+					warn("Invalid reference")
 					return nil
 				end
 
-				local distance = nextByte
-				local length = data:byte(i + 2)
-				local start = #decompressed - distance + 1
-
-				if start <= 0 then
-					warn("Corrupted data: invalid reference distance")
-					return nil
+				for k = 0, length - 1 do
+					table.insert(res, res[start + k])
 				end
 
-				for j = 0, length - 1 do
-					local sourceIndex = start + (j % distance)
-					if sourceIndex > #decompressed then
-						warn("Corrupted data: reference out of bounds")
-						return nil
-					end
-
-					table.insert(decompressed, decompressed[sourceIndex])
-				end
-
-				i = i + 3
+				i += 3
 			end
 		else
-			--literal
-			table.insert(decompressed, string.char(byte))
-			i = i + 1
+			table.insert(res, string.char(b))
+			i += 1
 		end
 	end
-
-	return table.concat(decompressed)
+	return table.concat(res)
 end
 
 function PackConstructor.validateCompression(original, compressed)
