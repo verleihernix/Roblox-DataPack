@@ -26,9 +26,11 @@ export type DataPack<T> = {
 	GetCompressionRatio: (self: DataPack<T>) -> number,
 	GetMetadata: (self: DataPack<T>) -> Metadata,
 	GetBuffer: (self: DataPack<T>) -> buffer?,
+	GetId: (self: DataPack<T>) -> string,
 }
 type InternalDataPack<T> = DataPack<T> & {
 	__index: any,
+	_id: string,
 	_buffer: buffer,
 	_originalSize: number,
 	_compressed: boolean,
@@ -321,6 +323,7 @@ function PackConstructor.New<T>(data: T, options): DataPack<T>
 	buffer.writestring(buff, 0, finalData)
 
 	local newPack = (setmetatable({}, DataPack) :: any) :: InternalDataPack<T>
+	newPack._id = HttpService:GenerateGUID(false)
 	newPack._buffer = buff
 	newPack._originalSize = origSize
 	newPack._compressed = isCompressed
@@ -331,6 +334,7 @@ end
 
 function PackConstructor.FromBuffer<T>(buf, metadata): DataPack<T>
 	local newPack = (setmetatable({}, DataPack) :: any) :: InternalDataPack<T>
+	newPack._id = HttpService:GenerateGUID(false)
 	newPack._buffer = buf
 	newPack._originalSize = buffer.len(buf)
 	newPack._compressed = false
@@ -338,6 +342,7 @@ function PackConstructor.FromBuffer<T>(buf, metadata): DataPack<T>
 
 	return newPack
 end
+
 DataPack["__index"] = DataPack
 
 function DataPack:Return()
@@ -460,6 +465,10 @@ function DataPack:GetStats()
 	) :: Stats
 end
 
+function DataPack:GetId()
+	return (self :: InternalDataPack<any>)._id
+end
+
 function DataPack:Clone()
 	local originalData = buffer.readstring(
 		(self :: InternalDataPack<any>)._buffer,
@@ -470,6 +479,8 @@ function DataPack:Clone()
 	buffer.writestring(newBuf, 0, originalData)
 
 	local newPack = (setmetatable({}, DataPack) :: any) :: InternalDataPack<any>
+	newPack._id = HttpService:GenerateGUID(false)
+	newPack._buffer = newBuf
 	newPack._originalSize = (self :: InternalDataPack<any>)._originalSize
 	newPack._compressed = (self :: InternalDataPack<any>)._compressed
 	newPack._metadata = if (self :: InternalDataPack<any>)._metadata
